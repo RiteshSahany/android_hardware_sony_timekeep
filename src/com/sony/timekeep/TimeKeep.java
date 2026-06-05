@@ -31,11 +31,8 @@
 
 package com.sony.timekeep;
 
-import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.lang.Long;
-import java.lang.System;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -44,39 +41,47 @@ import android.util.Log;
 import com.sony.timekeep.TimeKeepProperties;
 
 public class TimeKeep extends BroadcastReceiver {
-	private static final String TAG = "TimeKeep-Receiver";
-	private static final String RTC_SINCE_EPOCH = "/sys/class/rtc/rtc0/since_epoch";
+    private static final String TAG = "TimeKeep-Receiver";
+    private static final String RTC_SINCE_EPOCH = "/sys/class/rtc/rtc0/since_epoch";
 
-	@Override
-	public void onReceive(Context context, Intent intent) {
-		Log.d(TAG, "Got intent " + intent + ", storing time delta.");
+    @Override
+    public void onReceive(Context context, Intent intent) {
+        Log.d(TAG, "Got intent " + intent + ", storing time delta.");
 
-		long seconds = System.currentTimeMillis()/1000;
-		long epoch_since = readEpoch();
-		seconds -= epoch_since;
+        long seconds = System.currentTimeMillis()/1000;
+        long epochSince = readEpoch();
+        if (epochSince < 0) {
+            Log.e(TAG, "Failed to read epoch from " + RTC_SINCE_EPOCH + ", skipping store");
+            return;
+        }
+        seconds -= epochSince;
 
-		Log.d(TAG, "Setting adjust property to " + seconds);
-		TimeKeepProperties.timeadjust(seconds);
-	}
+        Log.d(TAG, "Setting adjust property to " + seconds);
+        try {
+            TimeKeepProperties.timeadjust(seconds);
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Failed to store time adjustment", e);
+        }
+    }
 
-	private long readEpoch() {
-		FileInputStream fis;
-		byte[] buffer = new byte[32];
-		int read = 0;
-		try {
-			fis = new FileInputStream(RTC_SINCE_EPOCH);
-			read = fis.read(buffer);
-			fis.close();
-		} catch (IOException e) {
-			Log.e(TAG, "Failed to read " + RTC_SINCE_EPOCH);
-			e.printStackTrace();
-		}
+    private long readEpoch() {
+        byte[] buffer = new byte[32];
+        int read = 0;
+        try (FileInputStream fis = new FileInputStream(RTC_SINCE_EPOCH)) {
+            read = fis.read(buffer);
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to read " + RTC_SINCE_EPOCH, e);
+            return -1L;
+        }
 
-		long epoch = 0;
-		if (read > 0) {
-			epoch = Integer.parseInt(new String(buffer).split("\n")[0]);
-		}
+        if (read > 0) {
+            try {
+                return Long.parseLong(new String(buffer, 0, read).trim());
+            } catch (NumberFormatException e) {
+                Log.e(TAG, "Unexpected value in " + RTC_SINCE_EPOCH, e);
+            }
+        }
 
-		return epoch;
-	}
+        return -1L;
+    }
 }
